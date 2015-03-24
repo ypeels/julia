@@ -596,9 +596,11 @@ JL_CALLABLE(jl_f_isdefined)
             return jl_field_isdefined(args[0], idx) ? jl_true : jl_false;
         }
         JL_TYPECHK(isdefined, module, args[0]);
-        JL_TYPECHK(isdefined, symbol, args[1]);
         m = (jl_module_t*)args[0];
         s = (jl_sym_t*)args[1];
+        if (jl_is_expr(s) && ((jl_expr_t*)s)->head == jl_symbol("hygienic"))
+            s = (jl_sym_t*)jl_exprarg(s,0);
+        JL_TYPECHK(isdefined, symbol, s);
     }
     assert(s);
     return jl_boundp(m, s) ? jl_true : jl_false;

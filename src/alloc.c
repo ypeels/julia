@@ -962,14 +962,17 @@ jl_expr_t *jl_exprn(jl_sym_t *head, size_t n)
 JL_CALLABLE(jl_f_new_expr)
 {
     JL_NARGSV(Expr, 1);
-    JL_TYPECHK(Expr, symbol, args[0]);
+    jl_sym_t *head = (jl_sym_t*)args[0];
+    if (jl_is_expr(head) && ((jl_expr_t*)head)->head == jl_symbol("hygienic"))
+        head = (jl_sym_t*)jl_exprarg(head,0);
+    JL_TYPECHK(Expr, symbol, head);
     jl_array_t *ar = jl_alloc_cell_1d(nargs-1);
     JL_GC_PUSH1(&ar);
     for(size_t i=0; i < nargs-1; i++)
         jl_cellset(ar, i, args[i+1]);
     jl_expr_t *ex = (jl_expr_t*)alloc_3w(); assert(NWORDS(sizeof(jl_expr_t))==3);
     jl_set_typeof(ex, jl_expr_type);
-    ex->head = (jl_sym_t*)args[0];
+    ex->head = head;
     ex->args = ar;
     ex->etype = (jl_value_t*)jl_any_type;
     JL_GC_POP();

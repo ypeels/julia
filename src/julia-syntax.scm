@@ -75,6 +75,10 @@
 (define (bad-formal-argument v)
   (error (string #\" (deparse v) #\" " is not a valid function argument name")))
 
+(define (hygienic-symbol? s)
+  (or (symbol? s)
+      (and (pair? s) (eq (car s) 'hygienic))))
+
 (define (arg-name v)
   (cond ((and (symbol? v) (not (eq? v 'true)) (not (eq? v 'false)))
          v)
@@ -84,9 +88,10 @@
          (case (car v)
            ((... kw)      (decl-var (cadr v)))
            ((|::|)
-            (if (not (symbol? (cadr v)))
+	    (if (not (hygienic-symbol? (cadr v)))
                 (bad-formal-argument (cadr v)))
             (decl-var v))
+	   ((hygienic) v)
            (else (bad-formal-argument v))))))
 
 ; convert a lambda list into a list of just symbols
@@ -415,11 +420,11 @@
         (map (lambda (x ub) `(call (top TypeVar) ',x ,ub ,@bnd)) sl upperbounds))))
 
 (define (sparam-name sp)
-  (cond ((symbol? sp)
+  (cond ((hygienic-symbol? sp)
          sp)
         ((and (length= sp 3)
               (eq? (car sp) '|<:|)
-              (symbol? (cadr sp)))
+	      (hygienic-symbol? (cadr sp)))
          (cadr sp))
         (else (error "malformed type parameter list"))))
 
@@ -1314,7 +1319,8 @@
                      (if (null? binds)
                          (cons 'varlist vars)
                          (cond
-                          ((or (symbol? (car binds)) (decl? (car binds)))
+			  ((or (hygienic-symbol? (car binds))
+			       (decl? (car binds)))
                            ;; just symbol -> add local
                            (loop (cdr binds)
                                  (cons (decl-var (car binds)) vars)))
@@ -1322,7 +1328,7 @@
                                 (eq? (caar binds) '=))
                            ;; some kind of assignment
                            (cond
-                            ((or (symbol? (cadar binds))
+			    ((or (hygienic-symbol? (cadar binds))
                                  (decl?   (cadar binds)))
                              ;; a=b -> add argument
                              (loop (cdr binds)
@@ -3234,46 +3240,52 @@ So far only the second case can actually occur.
 	 (call (top _expr) (inert tuple)
 	       (call (top _expr) (inert |...|) ,x))))
 
-(define (julia-bq-bracket x d)
+(define (julia-bq-bracket x d hygienic)
   (if (splice-expr? x)
       (if (= d 0)
 	  (cadr (cadr (cadr x)))
 	  (list 'cell1d
-		(wrap-with-splice (julia-bq-expand (cadr (cadr (cadr x))) (- d 1)))))
-      (list 'cell1d (julia-bq-expand x d))))
+		(wrap-with-splice (julia-bq-expand (cadr (cadr (cadr x))) (- d 1) hygienic))))
+      (list 'cell1d (julia-bq-expand x d hygienic))))
 
-(define (julia-bq-expand x d)
+(define (julia-bq-expand x d hygienic)
   (cond ((or (eq? x 'true) (eq? x 'false))  x)
-	((or (symbol? x) (jlgensym? x))     (list 'inert x))
+        ((jlgensym? x)     (list 'inert x))
+        ((symbol? x)       (if hygienic
+                            `(call (top _expr) (inert hygienic) ,(list 'inert x))
+                            (list 'inert x)))
         ((atom? x)  x)
         ((eq? (car x) 'quote)
-	 `(call (top _expr) (inert quote) ,(julia-bq-expand (cadr x) (+ d 1))))
+	 `(call (top _expr) (inert quote) ,(julia-bq-expand (cadr x) (+ d 1) hygienic)))
         ((eq? (car x) '$)
 	 (if (and (= d 0) (length= x 2))
 	     (cadr x)
 	     (if (splice-expr? (cadr x))
 		 `(call (top splicedexpr) (inert $)
-			(call (top append_any) ,(julia-bq-bracket (cadr x) (- d 1))))
-		 `(call (top _expr) (inert $) ,(julia-bq-expand (cadr x) (- d 1))))))
-        ((not (contains (lambda (e) (and (pair? e) (eq? (car e) '$))) x))
+			(call (top append_any) ,(julia-bq-bracket (cadr x) (- d 1) hygienic)))
+		 `(call (top _expr) (inert $) ,(julia-bq-expand (cadr x) (- d 1) hygienic)))))
+        ((and (not (contains (lambda (e) (and (pair? e) (eq? (car e) '$))) x))
+              (or (not hygienic) (eq? (car x) 'quote) (eq? (car x) 'line)))
          `(copyast (inert ,x)))
 	((not (any splice-expr? x))
-	 `(call (top _expr) ,.(map (lambda (ex) (julia-bq-expand ex d)) x)))
+	 `(call (top _expr) (quote ,(car x))
+                            ,.(map (lambda (ex) (julia-bq-expand ex d hygienic))
+                                   (cdr x))))
 	(else
 	 (let loop ((p (cdr x)) (q '()))
 	   (if (null? p)
 	       (let ((forms (reverse q)))
-		 `(call (top splicedexpr) ,(julia-bq-expand (car x) d)
+		 `(call (top splicedexpr) (quote ,(car x))
 			(call (top append_any) ,@forms)))
-	       (loop (cdr p) (cons (julia-bq-bracket (car p) d) q)))))))
+	       (loop (cdr p) (cons (julia-bq-bracket (car p) d hygienic) q)))))))
 
-(define (julia-expand-macros e)
+(define (julia-expand-macros e with-hygiene)
   (cond ((not (pair? e))     e)
         ((eq? (car e) 'quote)
          ;; backquote is essentially a built-in macro at the moment
-         (julia-expand-macros (julia-bq-expand (cadr e) 0)))
-        ((eq? (car e) 'inert)
-         e)
+	 (julia-expand-macros (julia-bq-expand (cadr e) 0 with-hygiene)
+			       with-hygiene))
+        ((eq? (car e) 'inert) e)
         ((eq? (car e) 'macrocall)
          ;; expand macro
          (let ((form
@@ -3281,7 +3293,7 @@ So far only the second case can actually occur.
 		    ;; for a custom triple-quoted string literal, first invoke mstr
 		    ;; to handle unindenting
 		    (apply invoke-julia-macro (cadr e)
-			   (julia-expand-macros `(macrocall @mstr ,(cadr (caddr e))))
+			   (julia-expand-macros `(macrocall @mstr ,(cadr (caddr e))) with-hygiene)
 			   (cdddr e))
 		    (apply invoke-julia-macro (cadr e) (cddr e)))))
            (if (not form)
@@ -3292,34 +3304,46 @@ So far only the second case can actually occur.
                  (m    (cdr form)))
              ;; m is the macro's def module, or #f if def env === use env
              (rename-symbolic-labels
-              (julia-expand-macros
-               (resolve-expansion-vars form m))))))
+              (julia-expand-macros (resolve-expansion-vars form m)
+		                            with-hygiene)))))
+        ((eq? (car e) 'macro)
+	 (map (lambda (se) (julia-expand-macros se #t)) e))
+	((eq? (car e) 'with_hygiene)
+	 (julia-expand-macros (cadr e) #t))
         (else
-         (map julia-expand-macros e))))
+	 (map (lambda (se) (julia-expand-macros se with-hygiene)) e))))
 
 (define (pair-with-gensyms v)
   (map (lambda (s)
-         (if (pair? s)
-             s
-             (cons s (named-gensy s))))
+	 (cond ((not (pair? s))
+		(cons s (named-gensy s)))
+	       ((eq? (car s) 'hygienic)
+		(cons s (named-gensy (cadr s))))
+	       (else s)))
        v))
 
+;TODO: Remove this after all uses of Expr(:escape ... have been eliminated
 (define (unescape e)
   (if (and (pair? e) (eq? (car e) 'escape))
       (cadr e)
       e))
 
+(define (strip-hygiene e)
+  (if (and (pair? e) (eq? (car e) 'hygienic))
+      (cadr e)
+      e))
+
 (define (typevar-expr-name e)
-  (if (symbol? e) e
+  (if (hygienic-symbol? e) e
       (cadr e)))
 
 (define (new-expansion-env-for x env)
   (append!
    (filter (lambda (v)
-             (not (assq (car v) env)))
+	     (not (assoc (car v) env)))
            (append!
             (pair-with-gensyms (vars-introduced-by x))
-            (map (lambda (v) (cons v v))
+	    (map (lambda (v) (cons v (strip-hygiene v)))
                  (keywords-introduced-by x))))
    env))
 
@@ -3336,17 +3360,21 @@ So far only the second case can actually occur.
 (define (resolve-expansion-vars- e env m inarg)
   (cond ((or (eq? e 'true) (eq? e 'false) (eq? e 'end))
          e)
-    ((symbol? e)
-     (let ((a (assq e env)))
-       (if a (cdr a)
-           (if m `(|.| ,m (quote ,e))
-           e))))
         ((or (not (pair? e)) (quoted? e))
          e)
         (else
          (case (car e)
-           ((jlgensym) e)
+	   ((hygienic)
+	    ;; Have to use assoc instead of assq because schema to julia
+	    ;; conversion defeats any attempt to make (hygienic <var>)
+	    ;; objects.  env is small enough that it shouldn't matter.
+	    (let ((a (assoc e env)))
+	      (if a (cdr a)
+		  (if m `(|.| ,m (quote ,(cadr e)))
+		      (cadr e)))))
+	   ;TODO: Remove this after all uses of Expr(:escape ... have been eliminated
            ((escape) (cadr e))
+       ((jlgensym) e)
            ((using import importall export) (map unescape e))
            ((macrocall)
         (if (or (eq? (cadr e) '@label) (eq? (cadr e) '@goto)) e
@@ -3393,12 +3421,12 @@ So far only the second case can actually occur.
                       ,(if inarg
                            (resolve-expansion-vars- (cadr (cadr e)) env m inarg)
                            ;; in keyword arg A=B, don't transform "A"
-                           (cadr (cadr e)))
+			   (strip-hygiene (cadr (cadr e))))
                       ,(resolve-expansion-vars- (caddr (cadr e)) env m inarg))
                      ,(resolve-expansion-vars- (caddr e) env m inarg))
                 `(kw ,(if inarg
                           (resolve-expansion-vars- (cadr e) env m inarg)
-                          (cadr e))
+			  (strip-hygiene (cadr e)))
                      ,(resolve-expansion-vars- (caddr e) env m inarg))))
 
            ((let)
@@ -3450,7 +3478,7 @@ So far only the second case can actually occur.
         ((escape)  '())
         ((= function)
          (append! (filter
-                   symbol?
+		   (lambda (x) (and (pair? x) (eq? (car x) 'hygienic)))
                    (if (and (pair? (cadr e)) (eq? (car (cadr e)) 'tuple))
                        (map decl-var* (cdr (cadr e)))
                        (list (decl-var* (cadr e)))))
@@ -3472,11 +3500,12 @@ So far only the second case can actually occur.
 
 (define (env-for-expansion e)
   (let ((globals (find-declared-vars-in-expansion e 'global)))
-    (let ((v (diff (delete-duplicates
+    (let ((v (difference (delete-duplicates
                     (append! (find-declared-vars-in-expansion e 'local)
                              (find-assigned-vars-in-expansion e)
                              (map (lambda (x)
-                                    (if (pair? x) (car x) x))
+					   (if (hygienic-symbol? x) x
+					       (car x)))
                                   (vars-introduced-by e))))
                    globals)))
       (append!
@@ -3505,7 +3534,7 @@ So far only the second case can actually occur.
     (expand-binding-forms ex))))
 
 (define (julia-expand0 ex)
-  (let ((e (julia-expand-macros ex)))
+  (let ((e (julia-expand-macros ex #f)))
     (if (and (pair? e) (eq? (car e) 'toplevel))
         `(toplevel ,.(map julia-expand01 (cdr e)))
         (julia-expand01 e))))

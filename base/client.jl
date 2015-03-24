@@ -61,7 +61,7 @@ function repl_cmd(cmd, out)
                 end
                 cd(ENV["OLDPWD"])
             else
-                cd(@windows? dir : readchomp(`$shell -c "echo $(shell_escape(dir))"`))
+            cd(@windows? dir : readchomp(`$shell -c "echo $(shell_escape(dir))"`))
             end
         else
             cd()
@@ -74,9 +74,10 @@ function repl_cmd(cmd, out)
     nothing
 end
 
-function repl_hook(input::AbstractString)
+function repl_hook(input:: AbstractString)
+    cmdmac = Expr(:., :Base, Expr(:quote, symbol("@cmd")))
     Expr(:call, :(Base.repl_cmd),
-         macroexpand(Expr(:macrocall,symbol("@cmd"),input)))
+         macroexpand(Expr(:macrocall, cmdmac, input)))
 end
 
 display_error(er) = display_error(er, [])
@@ -191,7 +192,7 @@ function init_bind_addr()
         bind_addr = string(parseip(bind_to[1]))
         if length(bind_to) > 1
             bind_port = parse(Int,bind_to[2])
-        else
+    else
             bind_port = 0
         end
     else
@@ -200,7 +201,7 @@ function init_bind_addr()
             bind_addr = string(getipaddr())
         catch
             # All networking is unavailable, initialize bind_addr to the loopback address
-            # Will cause an exception to be raised only when used.
+            # Will cause an exception to be raised only when used. 
             bind_addr = "127.0.0.1"
         end
     end
@@ -236,11 +237,11 @@ let reqarg = Set(UTF8String["--home",          "-H",
             println(STDERR, "julia: option `$arg` is missing an argument")
             exit(1)
         end
-        repl = true
-        startup = true
+    repl = true
+    startup = true
         history_file = true
         quiet = false
-        color_set = false
+    color_set = false
         while true
             # show julia VERSION and quit
             if Bool(opts.version)
@@ -259,8 +260,8 @@ let reqarg = Set(UTF8String["--home",          "-H",
             quiet = Bool(opts.quiet)
             # load ~/.juliarc file
             if opts.startupfile == 1
-                load_juliarc()
-                startup = false
+            load_juliarc()
+            startup = false
             elseif opts.startupfile == 2
                 startup = false
             end
@@ -283,9 +284,9 @@ let reqarg = Set(UTF8String["--home",          "-H",
                 color_set = true
                 global have_color = true
             elseif opts.color == 2
-                color_set = true
-                global have_color = false
-            end
+                    color_set = true
+                    global have_color = false
+                end
             # eval expression
             if opts.eval != C_NULL
                 repl = false
@@ -306,23 +307,23 @@ let reqarg = Set(UTF8String["--home",          "-H",
             # load file
             if !isempty(args)
                 if !isempty(args[1]) && args[1][1] != '-'
-                    if startup
-                        load_juliarc()
-                        startup = false
-                    end
-                    # program
-                    repl = false
+            if startup
+                load_juliarc()
+                startup = false
+            end
+            # program
+            repl = false
                     # remove filename from ARGS
                     shift!(ARGS)
-                    ccall(:jl_exit_on_sigint, Void, (Cint,), 1)
+            ccall(:jl_exit_on_sigint, Void, (Cint,), 1)
                     include(args[1])
-                else
+        else
                     println(STDERR, "julia: unknown option `$(args[1])`")
                     exit(1)
-                end
-            end
-            break
         end
+    end
+            break
+end
         return (quiet,repl,startup,color_set,history_file)
     end
 end
@@ -336,7 +337,7 @@ const LOAD_PATH = ByteString[]
 function init_load_path()
     vers = "v$(VERSION.major).$(VERSION.minor)"
     if haskey(ENV,"JULIA_LOAD_PATH")
-        prepend!(LOAD_PATH, split(ENV["JULIA_LOAD_PATH"], @windows? ';' : ':'))
+        prepend!(LOAD_PATH, split(ENV["JULIA_LOAD_PATH"], @windows? ';' : ':'))    
     end
     push!(LOAD_PATH,abspath(JULIA_HOME,"..","local","share","julia","site",vers))
     push!(LOAD_PATH,abspath(JULIA_HOME,"..","share","julia","site",vers))
@@ -443,17 +444,17 @@ function _start()
                 end
             else
                 active_repl_backend = REPL.run_repl(active_repl)
+                end
             end
-        end
     catch err
         display_error(err,catch_backtrace())
         println()
         exit(1)
     end
     if is_interactive && have_color
-        print(color_normal)
+            print(color_normal)
+        end
     end
-end
 
 const atexit_hooks = []
 
