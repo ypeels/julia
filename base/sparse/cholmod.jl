@@ -338,9 +338,9 @@ end
 
 ### cholmod_check.h ###
 function check_dense{T<:VTypes}(A::Dense{T})
-    Bool(ccall((:cholmod_l_check_dense, :libcholmod), Cint,
-        (Ptr{C_Dense{T}}, Ptr{UInt8}),
-         A.p, common(SuiteSparse_long)))
+    ccall((:cholmod_l_check_dense, :libcholmod), Cint,
+          (Ptr{C_Dense{T}}, Ptr{UInt8}),
+          A.p, common(SuiteSparse_long))!=0
 end
 
 # Non-Dense wrappers (which all depend on IType)
@@ -431,15 +431,15 @@ for Ti in IndexTypes
         end
 
         function check_sparse{Tv<:VTypes}(A::Sparse{Tv,$Ti})
-            Bool(ccall((@cholmod_name("check_sparse", $Ti),:libcholmod), Cint,
-                    (Ptr{C_Sparse{Tv,$Ti}}, Ptr{UInt8}),
-                        A.p, common($Ti)))
+            ccall((@cholmod_name("check_sparse", $Ti),:libcholmod), Cint,
+                  (Ptr{C_Sparse{Tv,$Ti}}, Ptr{UInt8}),
+                  A.p, common($Ti))!=0
         end
 
         function check_factor{Tv<:VTypes}(F::Factor{Tv,$Ti})
-            Bool(ccall((@cholmod_name("check_factor", $Ti),:libcholmod), Cint,
-                    (Ptr{C_Factor{Tv,$Ti}}, Ptr{UInt8}),
-                        F.p, common($Ti)))
+            ccall((@cholmod_name("check_factor", $Ti),:libcholmod), Cint,
+                  (Ptr{C_Factor{Tv,$Ti}}, Ptr{UInt8}),
+                  F.p, common($Ti))!=0
         end
 
         function nnz{Tv<:VTypes}(A::Sparse{Tv,$Ti})
@@ -887,8 +887,8 @@ eltype{T<:VTypes}(A::Sparse{T}) = T
 function show(io::IO, F::Factor)
     s = unsafe_load(F.p)
     println(io, typeof(F))
-    @printf(io, "type: %12s\n", Bool(s.is_ll) ? "LLt" : "LDLt")
-    @printf(io, "method: %10s\n", Bool(s.is_super) ? "supernodal" : "simplicial")
+    @printf(io, "type: %12s\n", s.is_ll!=0 ? "LLt" : "LDLt")
+    @printf(io, "method: %10s\n", s.is_super!=0 ? "supernodal" : "simplicial")
     @printf(io, "maxnnz: %10d\n", Int(s.nzmax))
     @printf(io, "nnz: %13d\n", nnz(Sparse(F)))
 end
@@ -1077,7 +1077,7 @@ ldltfact{Ti}(A::Hermitian{Complex{Float64},SparseMatrixCSC{Complex{Float64},Ti}}
 function update!{Tv<:VTypes,Ti<:ITypes}(F::Factor{Tv,Ti}, A::Sparse{Tv,Ti})
     cm = common(Ti)
     s = unsafe_load(F.p)
-    if Bool(s.is_ll)
+    if s.is_ll!=0
         cm[common_final_ll] = reinterpret(UInt8, [one(Cint)]) # Hack! makes it a llt
     end
     factorize!(A, F, cm)
@@ -1085,7 +1085,7 @@ end
 function update!{Tv<:VTypes,Ti<:ITypes}(F::Factor{Tv,Ti}, A::Sparse{Tv,Ti}, β::Tv)
     cm = common(Ti)
     s = unsafe_load(F.p)
-    if Bool(s.is_ll)
+    if s.is_ll!=0
         cm[common_final_ll] = reinterpret(UInt8, [one(Cint)]) # Hack! makes it a llt
     end
     factorize_p!(A, β, Ti[0:size(F, 1) - 1;], F, cm)
@@ -1112,7 +1112,7 @@ function diag{Tv}(F::Factor{Tv})
     f = unsafe_load(F.p)
     res = Base.zeros(Tv, Int(f.n))
     xv  = f.x
-    if Bool(f.is_super)
+    if f.is_super!=0
         px = f.px
         pos = 1
         for i in 1:f.nsuper
@@ -1141,7 +1141,7 @@ function logdet{Tv<:VTypes,Ti<:ITypes}(F::Factor{Tv,Ti})
     f = unsafe_load(F.p)
     res = zero(Tv)
     for d in diag(F) res += log(abs(d)) end
-    Bool(f.is_ll) ? 2res : res
+    f.is_ll!=0 ? 2res : res
 end
 
 det(L::Factor) = exp(logdet(L))
