@@ -2453,6 +2453,7 @@ static Value *emit_known_call(jl_value_t *ff, jl_value_t **args, size_t nargs,
         }
         if (i > nargs) {
             jl_value_t *ty = static_eval(expr, ctx, true, true);
+            rt1 = ty; // root ty
             if (ty!=NULL && jl_is_leaf_type(ty)) {
                 if (jl_has_typevars(ty) || jl_is_tuple(ty)) {
                     // add root for types not cached. issue #7065
@@ -2583,6 +2584,7 @@ static Value *emit_call(jl_value_t **args, size_t arglen, jl_codectx_t *ctx, jl_
     bool definitely_not_function = false;
 
     jl_function_t *f = (jl_function_t*)static_eval(a0, ctx, true);
+    JL_GC_PUSH1(&f);
     if (f != NULL) {
         // function is a compile-time constant
         Value *result;
@@ -2597,7 +2599,10 @@ static Value *emit_call(jl_value_t **args, size_t arglen, jl_codectx_t *ctx, jl_
             result = emit_known_call((jl_value_t*)jl_module_call_func(ctx->module),
                                      args-1, nargs+1, ctx, &theFptr, &f, expr);
         }
-        if (result != NULL) return result;
+        if (result != NULL) {
+            JL_GC_POP();
+            return result;
+        }
     }
 
     hdtype = expr_type(a0, ctx);
@@ -2691,6 +2696,7 @@ static Value *emit_call(jl_value_t **args, size_t arglen, jl_codectx_t *ctx, jl_
     }
 
     ctx->argDepth = last_depth;
+    JL_GC_POP();
     return result;
 }
 
