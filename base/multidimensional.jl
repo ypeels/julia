@@ -54,20 +54,6 @@ length{I<:CartesianIndex}(::Type{I})=length(super(I))
 # indexing
 getindex(index::CartesianIndex, i::Integer) = getfield(index, i)::Int
 
-stagedfunction setindex!{T,N}(A::Array{T}, v, index::CartesianIndex{N})
-    N==0 ? :(Base.arrayset(A, convert($T,v), 1)) : :(@ncall $N Base.arrayset A convert($T,v) d->index[d])
-end
-stagedfunction setindex!{T,N}(A::Array{T}, v, i::Integer, index::CartesianIndex{N})
-    N==0 ? :(Base.arrayset(A, convert($T,v), i)) : :(@ncall $(N+1) Base.arrayset A convert($T,v) d->(d == 1 ? i : index[d-1]))
-end
-
-stagedfunction setindex!{N}(A::AbstractArray, v, index::CartesianIndex{N})
-    :((@nref $N A d->index[d]) = v)
-end
-stagedfunction setindex!{N}(A::AbstractArray, v, i::Integer, index::CartesianIndex{N})
-    :((@nref $(N+1) A d->(d == 1 ? i : index[d-1])) = v)
-end
-
 # arithmetic, min/max
 for op in (:+, :-, :min, :max)
     @eval begin
@@ -347,6 +333,35 @@ function _unsafe_setindex!(::LinearIndexing, A::AbstractArray, x, I::AbstractArr
         end
     end
     A
+end
+
+stagedfunction _setindex!{T,AN,N}(l::LinearIndexing, A::AbstractArray{T,AN}, v, index::CartesianIndex{N})
+    if (l <: LinearSlow && N == AN) || (l <: LinearFast && N == 1)
+        :($(Expr(:meta, :inline)); @ncall $N setindex! A v d->index[d])
+    else
+        :($(Expr(:meta, :inline)); @ncall $N _setindex! l A v d->index[d])
+    end
+end
+stagedfunction _unsafe_setindex!{T,AN,N}(l::LinearIndexing, A::AbstractArray{T,AN}, v, index::CartesianIndex{N})
+    if (l <: LinearSlow && N == AN) || (l <: LinearFast && N == 1)
+        :($(Expr(:meta, :inline)); @ncall $N unsafe_setindex! A v d->index[d])
+    else
+        :($(Expr(:meta, :inline)); @ncall $N _unsafe_setindex! l A v d->index[d])
+    end
+end
+stagedfunction _setindex!{T,AN,N}(l::LinearIndexing, A::AbstractArray{T,AN}, v, i::Integer, index::CartesianIndex{N})
+    if (l <: LinearSlow && N+1 == AN) || (l <: LinearFast && N+1 == 1)
+        :($(Expr(:meta, :inline)); @ncall $N setindex! A v i d->index[d])
+    else
+        :($(Expr(:meta, :inline)); @ncall $N _setindex! l A v i d->index[d])
+    end
+end
+stagedfunction _unsafe_setindex!{T,AN,N}(l::LinearIndexing, A::AbstractArray{T,AN}, v, i::Integer, index::CartesianIndex{N})
+    if (l <: LinearSlow && N+1 == AN) || (l <: LinearFast && N+1 == 1)
+        :($(Expr(:meta, :inline)); @ncall $N unsafe_setindex! A v i d->index[d])
+    else
+        :($(Expr(:meta, :inline)); @ncall $N _unsafe_setindex! l A v i d->index[d])
+    end
 end
 
 # Use iteration over X so we don't need to worry about its storage
